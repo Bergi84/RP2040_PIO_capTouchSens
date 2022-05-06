@@ -1,0 +1,141 @@
+// OSR register holds discharge cnt
+// X is used als working register
+// Y register holds max charge cnt
+// must must run on sm0
+
+.Program capTouchSens_master
+    irq set 0
+
+    // wait discharge time
+    mov x, osr
+dischargeLoop:
+    jmp x-- dischargeLoop [1]
+
+    mov x, y
+    // signal charge
+    irq set 4 [2]
+
+chargeLoop:
+    jmp pin storeVal
+    jmp x-- chargeLoop
+storeVal:
+    mov isr, x
+    push
+
+    // wait for slaves
+    wait 1 irq 5        // clears irq flag after wait
+    wait 1 irq 6        // clears irq flag after wait
+    wait 1 irq 7        // clears irq flag after wait
+
+
+
+
+
+// X is used als working register
+// Y register holds max charge cnt
+// controls cap sens pins
+// should run on the last used sm
+
+.Program capTouchSens_seterSlave
+
+.side_set 2 opt
+
+    // discharge capacity
+    mov osr, !NULL
+    out PINDIRS, 32     side 1
+
+    // prepare for charge
+    mov osr, NULL
+    mov x, y
+
+    // wait for charge
+    wait 1 irq 4
+    out PINDIRS, 32     side 2
+
+chargeLoop:
+    jmp pin storeVal
+    jmp x-- chargeLoop
+storeVal:
+    mov isr, x
+    push
+
+    // sync to master
+    irq wait 4 rel    // signal slave ready and wait until clear
+
+
+
+// X is used als working register
+// Y register holds max charge cnt
+
+.Program capTouchSens_slave
+
+    mov x, y
+
+    // wait for charge
+    wait 1 irq 4 [1]
+
+chargeLoop:
+    jmp pin storeVal
+    jmp x-- chargeLoop
+storeVal:
+    mov isr, x
+    push
+
+    irq 4 rel   
+
+
+
+% c-sdk {
+
+// 2 excitationspins are used beignning with excPinBase
+// excPinBase ist the positiv excitation pin
+// excPinBase+1 ist the negativ excitation pin
+// in pol mask 1 = positiv, 0 = negativ, LSB in pol mask is pin at sensPinBase
+
+static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase, uint sensPinCount, uint sensPinPolMsk) {
+    pio_gpio_init(pio, excPinBase);
+    pio_gpio_init(pio, excPinBase + 1);
+
+    gpio_set_drive_strength (excPinBase, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_drive_strength (excPinBase + 1, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_set_slew_rate (excPinBase, GPIO_SLEW_RATE_FAST);
+    gpio_set_slew_rate (excPinBase + 1, GPIO_SLEW_RATE_FAST);
+
+    uint32_t pinMsk = 3 << excPinBase;
+    for(uint i = 0; i < sensPinCount; i++)
+    {
+        pio_gpio_init(pio, i + sensPinBase);
+        pinMsk |= 1 << (i + sensPinBase);
+        gpio_set_input_hysteresis_enabled (i + sensPinBase, true);
+        if( ~sensPinPolMsk & (1 << i) )
+        {
+            gpio_set_inover (i + sensPinBase, 1);
+        }
+    }
+
+    uint32_t pinDir = 3 << excPinBase;
+    uint32_t pinOut = (1 << excPinBase) | (~sensPinPolMsk) << sensPinBase;
+
+    pio_sm_set_pins_with_mask(pio, 3, pinOut, pinMsk);
+    pio_sm_set_pindirs_with_mask(pio, 3, pinDir, pinMsk);
+
+    uint offsetMaster = pio_add_program(pio, &capTouchSens_master_program);
+    pio_sm_config cMaster = capTouchSens_master_program_get_default_config(offsetMaster);
+    sm_config_set_clkdiv_int_frac (&cMaster, 1, 0);
+
+    uint offsetSeterSlave = pio_add_program(pio, &capTouchSens_seterSlave_program);
+    pio_sm_config cSeterSlave = capTouchSens_seterSlave_program_get_default_config(offsetSeterSlave);
+    sm_config_set_sideset_pins(&cSeterSlave, excPinBase);
+    sm_config_set_out_pins (&cSeterSlave, sensPinBase, sensPinCount);
+    sm_config_set_clkdiv_int_frac (&cSeterSlave, 1, 0);
+
+    uint offsetSlave = pio_add_program(pio, &capTouchSens_slave_program);
+    pio_sm_config cSlave = capTouchSens_slave_program_get_default_config(offsetSlave);
+    sm_config_set_clkdiv_int_frac (&cSlave, 1, 0);
+
+    pio_sm_init(pio, 0, offsetMaster + 1, &cMaster);
+    pio_sm_init(pio, 1, offsetSlave, &cSlave);
+    pio_sm_init(pio, 2, offsetSlave, &cSlave);
+    pio_sm_init(pio, 3, offsetSeterSlave, &cSeterSlave);
+}
+%}
