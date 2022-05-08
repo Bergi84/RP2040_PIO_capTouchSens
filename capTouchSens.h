@@ -15,17 +15,18 @@ class capTouchSens {
     uint sensPinBase;
     uint sensPinPolMsk;
 
-    uint capVal[sensPinCount];
     uint sumBuf[4];
     uint sumCnt;
     uint sampleCnt;
     uint sumShift;
     uint aktivPin;
 
-    void setSensCh(uint sm, uint gpio)
+    uint maxChgCnt;
+
+    inline void setSensCh(uint sm, uint gpio)
     {
         uint32_t tmp = pio->sm[sm].execctrl;
-        tmp &= PIO_SM0_EXECCTRL_JMP_PIN_BITS;
+        tmp &= ~PIO_SM0_EXECCTRL_JMP_PIN_BITS;
         tmp |= gpio << PIO_SM0_EXECCTRL_JMP_PIN_LSB;
         pio->sm[sm].execctrl = tmp;
     }
@@ -48,14 +49,17 @@ class capTouchSens {
     }
 
 public:
-    void init(PIO aPio, uint aExcPinBase, uint aSensPinBase, uint aSensPinPolMsk)
+    uint capVal[sensPinCount];
+
+    void init(PIO aPio, uint aExcPinBase, uint aSensPinBase, uint aSensPinPolMsk, uint aMaxChgCnt, uint aDchgCnt)
     {
         pio = aPio;
         excPinBase = aExcPinBase;
         sensPinBase = aSensPinBase;
         sensPinPolMsk = aSensPinPolMsk;
+        maxChgCnt = aMaxChgCnt;
 
-        capTouchSens_init(aPio, aExcPinBase, aSensPinBase, sensPinCount, aSensPinPolMsk);
+        capTouchSens_init(aPio, aExcPinBase, aSensPinBase, sensPinCount, aSensPinPolMsk, aMaxChgCnt, aDchgCnt);
 
         for(uint i = 0; i < sensPinCount; i++)
         {
@@ -114,7 +118,8 @@ public:
         {
             for(int i = 0; i < 4; i++)
             {
-                capVal[aktivPin] = sumBuf[i] >> sumShift;
+                capVal[aktivPin] = maxChgCnt - (sumBuf[i] >> sumShift);
+                sumBuf[i] = 0;
                 if(aktivPin == sensPinCount - 1)
                 {
                     aktivPin = 0;

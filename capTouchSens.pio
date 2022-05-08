@@ -4,6 +4,9 @@
 // must must run on sm0
 
 .Program capTouchSens_master
+    .origin 20
+
+    .wrap_target
     irq set 0
 
     // wait discharge time
@@ -26,6 +29,7 @@ storeVal:
     wait 1 irq 5        // clears irq flag after wait
     wait 1 irq 6        // clears irq flag after wait
     wait 1 irq 7        // clears irq flag after wait
+    .wrap
 
 
 
@@ -37,9 +41,10 @@ storeVal:
 // should run on the last used sm
 
 .Program capTouchSens_seterSlave
+    .origin 9
+    .side_set 2 opt
 
-.side_set 2 opt
-
+    .wrap_target
     // discharge capacity
     mov osr, !NULL
     out PINDIRS, 32     side 1
@@ -61,6 +66,7 @@ storeVal:
 
     // sync to master
     irq wait 4 rel    // signal slave ready and wait until clear
+    .wrap
 
 
 
@@ -68,7 +74,9 @@ storeVal:
 // Y register holds max charge cnt
 
 .Program capTouchSens_slave
+    .origin 2
 
+    .wrap_target
     mov x, y
 
     // wait for charge
@@ -81,7 +89,8 @@ storeVal:
     mov isr, x
     push
 
-    irq 4 rel   
+    irq 4 rel
+    .wrap
 
 
 
@@ -92,7 +101,7 @@ storeVal:
 // excPinBase+1 ist the negativ excitation pin
 // in pol mask 1 = positiv, 0 = negativ, LSB in pol mask is pin at sensPinBase
 
-static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase, uint sensPinCount, uint sensPinPolMsk) {
+static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase, uint sensPinCount, uint sensPinPolMsk, uint maxChgCnt, uint dchgCnt) {
     pio_gpio_init(pio, excPinBase);
     pio_gpio_init(pio, excPinBase + 1);
 
@@ -105,9 +114,10 @@ static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase,
     for(uint i = 0; i < sensPinCount; i++)
     {
         pio_gpio_init(pio, i + sensPinBase);
+        gpio_set_pulls (i + sensPinBase, false, false);
         pinMsk |= 1 << (i + sensPinBase);
         gpio_set_input_hysteresis_enabled (i + sensPinBase, true);
-        if( ~sensPinPolMsk & (1 << i) )
+        if( sensPinPolMsk & (1 << i) == 0)
         {
             gpio_set_inover (i + sensPinBase, 1);
         }
@@ -115,9 +125,6 @@ static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase,
 
     uint32_t pinDir = 3 << excPinBase;
     uint32_t pinOut = (1 << excPinBase) | (~sensPinPolMsk) << sensPinBase;
-
-    pio_sm_set_pins_with_mask(pio, 3, pinOut, pinMsk);
-    pio_sm_set_pindirs_with_mask(pio, 3, pinDir, pinMsk);
 
     uint offsetMaster = pio_add_program(pio, &capTouchSens_master_program);
     pio_sm_config cMaster = capTouchSens_master_program_get_default_config(offsetMaster);
@@ -134,8 +141,27 @@ static inline void capTouchSens_init(PIO pio, uint excPinBase, uint sensPinBase,
     sm_config_set_clkdiv_int_frac (&cSlave, 1, 0);
 
     pio_sm_init(pio, 0, offsetMaster + 1, &cMaster);
+    pio_sm_put (pio, 0, maxChgCnt);
+    pio_sm_exec (pio, 0, pio_encode_pull(false, false));
+    pio_sm_exec (pio, 0, pio_encode_mov(pio_y, pio_osr));
+    pio_sm_put (pio, 0, dchgCnt);
+    pio_sm_exec (pio, 0, pio_encode_pull(false, false));
+
     pio_sm_init(pio, 1, offsetSlave, &cSlave);
+    pio_sm_put (pio, 1, maxChgCnt);
+    pio_sm_exec (pio, 1, pio_encode_pull(false, false));
+    pio_sm_exec (pio, 1, pio_encode_mov(pio_y, pio_osr));
+
     pio_sm_init(pio, 2, offsetSlave, &cSlave);
+    pio_sm_put (pio, 2, maxChgCnt);
+    pio_sm_exec (pio, 2, pio_encode_pull(false, false));
+    pio_sm_exec (pio, 2, pio_encode_mov(pio_y, pio_osr));
+
     pio_sm_init(pio, 3, offsetSeterSlave, &cSeterSlave);
+    pio_sm_set_pins_with_mask(pio, 3, pinOut, pinMsk);
+    pio_sm_set_pindirs_with_mask(pio, 3, pinDir, pinMsk);
+    pio_sm_put (pio, 3, maxChgCnt);
+    pio_sm_exec (pio, 3, pio_encode_pull(false, false));
+    pio_sm_exec (pio, 3, pio_encode_mov(pio_y, pio_osr));
 }
 %}

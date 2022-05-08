@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cwd": "${workspaceRoot}",
+            "executable": "./build/capTouchSensTest.elf",
+            "name": "Debug (Openocd)",
+            "device": "Pico2040",
+            "configFiles": [
+                "board/pico-jlink.cfg",
+            ],
+            "searchDir": ["D:\\Programme\\openocd_rp2040\\tcl"],
+            "runToEntryPoint": "main",
+            "svdFile": "D:/Projekte/pico-sdk/src/rp2040/hardware_regs/rp2040.svd",
+        }
+    ]
+}
